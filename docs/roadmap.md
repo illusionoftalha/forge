@@ -9,12 +9,12 @@
 - Notes, workspace restore, cancellable worker jobs and standalone HTML export.
 - Reproducible synthetic regression fixture and Windows/Linux CI.
 
-## Next — Repository engine
+## 0.2 — Repository engine (implemented)
 
-- Incremental indexing with measured memory limits.
-- File change/rename tracking and index recovery after interruption.
-- Search-result navigation and line highlights.
-- Dedicated jobs panel with progress and structured error details.
+- Bounded incremental text cache with a reproducible allocation benchmark.
+- Added, modified, removed and exact-content rename tracking; tested recovery after a killed worker.
+- Navigable search hits, line highlights and stale-result detection.
+- Jobs panel, live index progress and structured failure details.
 
 ## Later — Code and evidence intelligence
 
@@ -28,7 +28,7 @@
 
 - Keyboard accessibility audit and full interactive UI automation.
 - Benchmarks with hardware, input datasets and reproducible scripts.
-- Versioned migrations beyond schema 1 and failure injection around upgrades.
+- Future schema migrations and failure injection around upgrades.
 - Signed native installers, after choosing how to distribute Python.
 
-These are future tasks, not available features. No cloud backend, marketplace, collaboration server or AI diagnosis is promised by this release.
+The later milestones and release-maturity items are future tasks.

@@ -22,6 +22,8 @@ PROTOCOL = 1
 MAX_FILE = 2 * 1024 * 1024
 MAX_OUTPUT = 4 * 1024 * 1024
 MAX_FILES = 20000
+MAX_INDEX = 32 * 1024 * 1024
+PROGRESS = False
 SKIP = {'.git', '.hg', '.svn', 'node_modules', '.venv', 'venv', '__pycache__', 'build', 'target', 'dist'}
 
 
@@ -61,17 +63,26 @@ def connect(workspace):
     db = sqlite3.connect(root / 'forge.sqlite', timeout=5)
     try:
         version = db.execute('PRAGMA user_version').fetchone()[0]
-        if version > 1:
+        if version > 2:
             raise ValueError('Workspace was created by a newer Forge version')
+        if version == 2:
+            return db
         with db:
             db.executescript('''
+                BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS evidence(
                     id INTEGER PRIMARY KEY, kind TEXT NOT NULL, source TEXT NOT NULL,
                     content TEXT NOT NULL, sha256 TEXT NOT NULL, captured TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS notebook(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
                 INSERT OR IGNORE INTO notebook VALUES(1,'');
-                PRAGMA user_version=1;
+                CREATE TABLE IF NOT EXISTS source_index(
+                    path TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, sha256 TEXT NOT NULL,
+                    content TEXT NOT NULL, bytes INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS index_changes(
+                    kind TEXT NOT NULL, path TEXT NOT NULL, previous TEXT NOT NULL);
+                PRAGMA user_version=2;
+                COMMIT;
             ''')
         return db
     except Exception:
@@ -122,6 +133,101 @@ def files(root):
     return paths[:MAX_FILES], limited
 
 
+def progress(phase, completed, total):
+    if PROGRESS:
+        print(json.dumps({'phase': phase, 'completed': completed, 'total': total}),
+              file=sys.stderr, flush=True)
+
+
+def fingerprint(path):
+    stat = path.stat()
+    return ':'.join(str(v) for v in (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino))
+
+
+class IndexLimit(ValueError):
+    """The requested index cannot fit the configured resource budget."""
+
+
+def update_index(db, root, rebuild=False, listing=None):
+    """Commit one bounded generation atomically; killed workers leave the prior one intact.
+
+    Only metadata for unchanged entries lives in Python. Text is read one file at a
+    time. Rename inference requires an unambiguous, identical decoded-text hash.
+    """
+    started = time.monotonic()
+    paths, limited = listing if listing is not None else files(root)
+    if limited:
+        raise IndexLimit('Repository exceeds 20,000 files; index not changed')
+    stats = dict(scanned=len(paths), reused=0, updated=0, skipped=0, bytes=0)
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        owner = db.execute("SELECT value FROM settings WHERE key='index_repository'").fetchone()
+        if not owner or owner[0] != str(root):
+            db.execute('DELETE FROM source_index')
+        old = {r[0]: (r[1], r[2], r[3]) for r in db.execute(
+            'SELECT path,fingerprint,sha256,bytes FROM source_index')}
+        remaining = set(old)
+        added, removed, modified = {}, {}, []
+        for number, relative in enumerate(paths, 1):
+            if time.monotonic() - started > 22:
+                raise IndexLimit('Index refresh exceeded 22 seconds; previous index preserved')
+            if number == 1 or number % 100 == 0:
+                progress('Indexing files', number - 1, len(paths))
+            try:
+                path = safe_file(root, relative)
+                stamp = fingerprint(path)
+                previous = old.get(relative)
+                if previous and previous[0] == stamp and not rebuild:
+                    size, digest = previous[2], previous[1]
+                    stats['reused'] += 1
+                else:
+                    text = read_text(path)
+                    if stamp != fingerprint(path):
+                        raise ValueError('File changed during read')
+                    size = len(text.encode('utf-8'))
+                    digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
+                    if stats['bytes'] + size > MAX_INDEX:
+                        raise IndexLimit('Index exceeds 32 MiB; previous index preserved')
+                    db.execute('INSERT OR REPLACE INTO source_index VALUES(?,?,?,?,?)',
+                               (relative, stamp, digest, text, size))
+                    stats['updated'] += 1
+                if stats['bytes'] + size > MAX_INDEX:
+                    raise IndexLimit('Index exceeds 32 MiB; previous index preserved')
+                stats['bytes'] += size
+                remaining.discard(relative)
+                if not previous:
+                    added[relative] = digest
+                elif previous[1] != digest:
+                    modified.append(relative)
+            except IndexLimit:
+                raise
+            except (OSError, ValueError):
+                stats['skipped'] += 1
+        for relative in remaining:
+            removed[relative] = old[relative][1]
+            db.execute('DELETE FROM source_index WHERE path=?', (relative,))
+        changes = [('modified', p, '') for p in modified]
+        by_added, by_removed = {}, {}
+        for p, digest in added.items(): by_added.setdefault(digest, []).append(p)
+        for p, digest in removed.items(): by_removed.setdefault(digest, []).append(p)
+        for digest in by_added.keys() & by_removed.keys():
+            if len(by_added[digest]) == len(by_removed[digest]) == 1:
+                new, prior = by_added[digest][0], by_removed[digest][0]
+                changes.append(('renamed', new, prior))
+                del added[new]; del removed[prior]
+        changes.extend(('added', p, '') for p in added)
+        changes.extend(('removed', p, '') for p in removed)
+        # Retain the latest nonempty change set across no-op refreshes.
+        if changes or not owner or owner[0] != str(root):
+            db.execute('DELETE FROM index_changes')
+            db.executemany('INSERT INTO index_changes VALUES(?,?,?)', sorted(changes))
+        db.execute("INSERT OR REPLACE INTO settings VALUES('index_repository',?)", (str(root),))
+        db.execute("INSERT OR REPLACE INTO settings VALUES('index_stats',?)", (json.dumps(stats),))
+    progress('Index complete', len(paths), len(paths))
+    stats['elapsed_ms'] = round((time.monotonic() - started) * 1000)
+    return stats
+
+
 def snapshot(db):
     row = db.execute("SELECT value FROM settings WHERE key='repository'").fetchone()
     evidence = [dict(zip(('id','kind','source','sha256','captured'), r)) for r in db.execute(
@@ -161,19 +267,23 @@ def handle(request):
     with closing(connect(workspace)) as db:
         if action == 'state':
             return snapshot(db)
-        if action == 'open':
-            root = Path(request['repository']).resolve(strict=True)
-            actual = Path(git(root, 'rev-parse', '--show-toplevel').strip()).resolve()
-            paths, limited = files(actual)
-            with db:
-                db.execute("INSERT OR REPLACE INTO settings VALUES('repository',?)", (str(actual),))
-            return {'repository': str(actual), 'files': paths, 'limited': limited,
-                    'status': git(actual, 'status', '--short', '--untracked-files=no')}
-        if action == 'files':
-            root = repository(db)
+        if action in ('open', 'files'):
+            if action == 'open':
+                selected = Path(request['repository']).resolve(strict=True)
+                root = Path(git(selected, 'rev-parse', '--show-toplevel').strip()).resolve()
+            else:
+                root = repository(db)
             paths, limited = files(root)
-            return {'repository': str(root), 'files': paths, 'limited': limited,
-                    'status': git(root, 'status', '--short', '--untracked-files=no')}
+            result = {'repository': str(root), 'files': paths, 'limited': limited,
+                      'status': git(root, 'status', '--short', '--untracked-files=no')}
+            try:
+                result['index'] = update_index(db, root, request.get('rebuild') is True, (paths, limited))
+            except IndexLimit as error:
+                result['index_warning'] = str(error)
+            if action == 'open':
+                with db:
+                    db.execute("INSERT OR REPLACE INTO settings VALUES('repository',?)", (str(root),))
+            return result
         if action == 'read':
             root = repository(db)
             path = safe_file(root, request['path'])
@@ -197,26 +307,23 @@ def handle(request):
             query = request['query']
             if not isinstance(query,str) or not query.strip():
                 raise ValueError('Search requires nonempty literal text')
-            paths, limited = files(root)
-            hits, skipped = [], 0
-            budget = 32 * 1024 * 1024
-            for relative in paths:
-                try:
-                    path = safe_file(root, relative)
-                    if path.stat().st_size > budget:
-                        limited = True
-                        break
-                    text = read_text(path)
-                    budget -= len(text.encode('utf-8'))
-                except (OSError, ValueError):
-                    skipped += 1
-                    continue
-                for number, line in enumerate(text.splitlines(), 1):
-                    if query.casefold() in line.casefold():
-                        hits.append({'path': relative, 'line': number, 'text': line[:400]})
+            stats = update_index(db, root)
+            hits = []
+            folded = query.casefold()
+            for relative, text, digest in db.execute('SELECT path,content,sha256 FROM source_index ORDER BY path'):
+                for number, line in enumerate(text.split('\n'), 1):
+                    if folded in line.casefold():
+                        hits.append({'path': relative, 'line': number, 'text': line[:400], 'sha256': digest})
                         if len(hits) >= 300:
-                            return {'hits': hits, 'limited': True, 'skipped': skipped}
-            return {'hits': hits, 'limited': limited, 'skipped': skipped}
+                            return {'hits': hits, 'limited': True, 'skipped': stats['skipped'], 'index': stats}
+            return {'hits': hits, 'limited': False, 'skipped': stats['skipped'], 'index': stats}
+        if action == 'changes':
+            root = repository(db)
+            owner = db.execute("SELECT value FROM settings WHERE key='index_repository'").fetchone()
+            if not owner or owner[0] != str(root):
+                return {'changes': []}
+            return {'changes': [dict(zip(('kind', 'path', 'previous'), row)) for row in
+                                db.execute('SELECT kind,path,previous FROM index_changes ORDER BY path')]}
         if action == 'capture':
             kind, source, content = request['kind'], request['source'], request['content']
             if not all(isinstance(v,str) for v in (kind,source,content)) or not kind or not source:
@@ -247,6 +354,9 @@ def handle(request):
 
 
 def main():
+    global PROGRESS
+    PROGRESS = True
+    request = {}
     try:
         raw = sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
         if len(raw) > 8 * 1024 * 1024:
@@ -255,8 +365,11 @@ def main():
         if not isinstance(request,dict):
             raise ValueError('Expected a JSON object')
         result = {'version': PROTOCOL, 'ok': True, 'data': handle(request)}
-    except (ValueError, KeyError, OSError, sqlite3.Error) as error:
-        result = {'version': PROTOCOL, 'ok': False, 'error': str(error)}
+    except (ValueError, OverflowError, KeyError, OSError, sqlite3.Error) as error:
+        result = {'version': PROTOCOL, 'ok': False, 'error': str(error),
+                  'error_details': {'code': type(error).__name__,
+                                    'action': request.get('action', '') if isinstance(request, dict) else '',
+                                    'message': str(error)}}
     sys.stdout.buffer.write(json.dumps(result, ensure_ascii=True).encode('utf-8'))
 
 

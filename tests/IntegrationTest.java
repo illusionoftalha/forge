@@ -28,9 +28,24 @@ public final class IntegrationTest {
         Path home = Path.of("").toAbsolutePath(),
              workspace = Files.createTempDirectory("forge-integration-");
         try {
+            javax.swing.SwingUtilities.invokeAndWait(() -> {
+                var area = new javax.swing.JTextArea("first\r\nsecond\nthird");
+                Main.highlightLine(area, 2);
+                check(area.getCaretPosition() == 7, "search navigation selects correct line");
+                check(area.getHighlighter().getHighlights().length == 1, "line highlight visible");
+                Main.highlightLine(area, 999);
+                check(area.getCaretPosition() == 14, "line navigation clamps to document");
+            });
             Bridge bridge = new Bridge(home);
             Map<String, Object> state = bridge.call(workspace, "state", Map.of());
             check(state.get("repository").equals(""), "new workspace");
+            boolean structuredError = false;
+            try {
+                bridge.call(workspace, "read", Map.of("path", "missing"));
+            } catch (Bridge.WorkerException error) {
+                structuredError = error.code.equals("ValueError") && error.action.equals("read");
+            }
+            check(structuredError, "structured worker errors preserve action and code");
             String raw = Files.readString(home.resolve("fixtures/incident.txt"));
             String report = Dump.parse(raw).report();
             check(report.contains("1 monitor cycles"), "detect incident cycle");
@@ -59,6 +74,15 @@ public final class IntegrationTest {
                 versionRejected = expected.getMessage().contains("protocol version");
             }
             check(versionRejected, "reject unsupported worker protocol");
+            Files.writeString(fakeWorker,
+                "import sys,time\nsys.stdin.read()\n" +
+                "print('{\"phase\":\"Indexing\",\"completed\":1,\"total\":2}',file=sys.stderr,flush=True)\n" +
+                "time.sleep(.2)\nprint('{\"version\":1,\"ok\":true,\"data\":{}}')\n");
+            List<Map<?, ?>> events = new ArrayList<>();
+            fake.onProgress(events::add);
+            fake.call(workspace, "files", Map.of());
+            check(events.size() == 1 && events.get(0).get("phase").equals("Indexing"),
+                  "worker progress arrives separately from response");
             Files.writeString(fakeWorker,
                               "import " +
                               "sys,time,pathlib\nsys.stdin.read()\npathlib.Path(__file__).with_" +

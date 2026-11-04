@@ -22,7 +22,8 @@ Failure:
 | --- | --- | --- |
 | state | none | Saved repository, notebook and evidence metadata |
 | open | repository | Resolve Git root, save it, enumerate files and status |
-| files | none | Refresh file listing and tracked-file status |
+| files | optional `rebuild: true` | Refresh listing, status and index; returns index counters or an index budget warning |
+| changes | none | Latest nonempty change set for the selected repository |
 | read | path | Bounded text preview and text digest |
 | history | none | Recent commits across refs |
 | diff | sha | Commit metadata, stat and patch |
@@ -33,3 +34,5 @@ Failure:
 | export | path | Create a new standalone HTML report |
 
 The protocol is local and receives full filesystem paths by design. It is not an authenticated remote API. Do not expose it as a network service without a separate threat model.
+
+Indexing may emit newline-delimited JSON events on stderr with `phase`, `completed` and `total`. Stdout still contains exactly one response. Failures may include `error_details` with `action`, `code` and `message`; `error` remains available for version 1 clients. Search hits carry a digest of the indexed text so clients can detect stale line locations.

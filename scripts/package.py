@@ -7,7 +7,7 @@ import zipfile
 
 root=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--version',default='0.1.1')
+parser.add_argument('--version',default='0.2.0')
 args=parser.parse_args()
 if not re.fullmatch(r'\d+\.\d+\.\d+(?:-[a-z0-9.]+)?',args.version):
     parser.error('version must be a semantic version without path characters')

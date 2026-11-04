@@ -14,7 +14,7 @@ import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 
-/** Forge 0.1: a complete repository-to-incident workflow. */
+/** Forge 0.2: a complete repository-to-incident workflow. */
 public final class Main {
     private static final Color BG = Theme.BACKGROUND, PANEL = Theme.SURFACE, TEXT = Theme.INK,
                                MUTED = Theme.MUTED, ACCENT = Theme.INK;
@@ -36,6 +36,11 @@ public final class Main {
     private final JLabel context = new JLabel("No repository selected"),
                          status = new JLabel("Ready"), source = new JLabel("EVIDENCE VIEWER");
     private final JTabbedPane navigation = new JTabbedPane(), content = new JTabbedPane();
+    private final DefaultListModel<String> resultsModel = new DefaultListModel<>();
+    private final JList<String> results = new JList<>(resultsModel);
+    private final List<Map<String, Object>> resultData = new ArrayList<>();
+    private final JTextArea jobs = area(false);
+    private final JProgressBar progressBar = new JProgressBar();
     private SwingWorker<?, ?> task;
     private volatile boolean busy;
     private volatile boolean cancelled;
@@ -96,6 +101,7 @@ public final class Main {
         navigation.addTab("Files", new JScrollPane(files));
         navigation.addTab("Commits", new JScrollPane(commits));
         navigation.addTab("Evidence", new JScrollPane(evidence));
+        navigation.addTab("Results", new JScrollPane(results));
         JPanel left = new JPanel(new BorderLayout(0, 10));
         left.setOpaque(false);
         query.setToolTipText("Literal case-insensitive repository search; Enter to run");
@@ -124,9 +130,33 @@ public final class Main {
         split.setBorder(null);
         root.add(split, BorderLayout.CENTER);
         status.setForeground(MUTED);
-        root.add(status, BorderLayout.SOUTH);
+        JPanel footer = new JPanel(new BorderLayout(16, 0));
+        footer.setOpaque(false);
+        progressBar.setPreferredSize(new Dimension(180, 6));
+        footer.add(status, BorderLayout.CENTER);
+        footer.add(progressBar, BorderLayout.EAST);
+        root.add(footer, BorderLayout.SOUTH);
+        JPanel jobPanel = new JPanel(new BorderLayout(0, 8));
+        JPanel indexActions = new JPanel(new FlowLayout(FlowLayout.LEFT, 7, 0));
+        indexActions.setOpaque(false);
+        jobPanel.setOpaque(false);
+        button(indexActions, "View changes", this::changes);
+        button(indexActions, "Rebuild index", () -> refresh(true));
+        jobPanel.add(indexActions, BorderLayout.NORTH);
+        jobPanel.add(new JScrollPane(jobs), BorderLayout.CENTER);
+        content.addTab("Jobs & index", jobPanel);
+        bridge.onProgress(event -> SwingUtilities.invokeLater(() -> {
+            if (!busy || cancelled) return;
+            if (event.get("completed") instanceof Number completed &&
+                event.get("total") instanceof Number total) {
+                progressBar.setIndeterminate(false);
+                progressBar.setMaximum(Math.max(1, total.intValue()));
+                progressBar.setValue(completed.intValue());
+                status.setText(event.get("phase") + " · " + completed + " / " + total);
+            }
+        }));
         frame.setContentPane(root);
-        for (JList<String> list : List.of(files, commits, evidence)) {
+        for (JList<String> list : List.of(files, commits, evidence, results)) {
             list.setBackground(PANEL);
             list.setForeground(TEXT);
             list.setSelectionBackground(new Color(47, 49, 55));
@@ -143,6 +173,21 @@ public final class Main {
                 }
             });
         }
+        results.addListSelectionListener(e -> {
+            int i = results.getSelectedIndex();
+            if (!e.getValueIsAdjusting() && i >= 0 && i < resultData.size() && idle()) {
+                Map<String, Object> hit = resultData.get(i);
+                run("Opening search result",
+                    () -> bridge.call(workspace, "read", Map.of("path", str(hit, "path"))), r -> {
+                        inspect("source", str(r, "source"), str(r, "text"));
+                        if (!str(hit, "sha256").equals(str(r, "sha256"))) {
+                            status.setText("File changed since search. Search again to update line locations.");
+                            return;
+                        }
+                        highlightLine(viewer, ((Number)hit.get("line")).intValue());
+                    });
+            }
+        });
         files.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting() && files.getSelectedValue() != null && idle()) {
                 String path = files.getSelectedValue();
@@ -217,6 +262,9 @@ public final class Main {
         }
         status.setText(label + " …");
         busy = true;
+        long started = System.nanoTime();
+        appendJob("RUNNING  " + label);
+        progressBar.setIndeterminate(true);
         cancelled = false;
         task = new SwingWorker<T, Void>() {
             protected T doInBackground() throws Exception {
@@ -230,19 +278,28 @@ public final class Main {
                         return;
                     if (cancelled) {
                         status.setText("Cancelled. Saved data remains available.");
+                        appendJob("CANCELLED  " + label);
                         return;
                     }
                     T result = get();
                     status.setText(label + " complete");
                     apply.accept(result);
+                    appendJob("COMPLETE  " + label + " · " +
+                              ((System.nanoTime() - started) / 1_000_000) + " ms");
                 } catch (Exception e) {
                     Throwable cause = e.getCause() == null ? e : e.getCause();
                     status.setText("Failed: " + cause.getMessage());
+                    String detail = cause instanceof Bridge.WorkerException error
+                        ? error.code + " / " + error.action : cause.getClass().getSimpleName();
+                    appendJob("FAILED  " + label + "\n  " + detail + "\n  " + cause.getMessage());
                     JOptionPane.showMessageDialog(frame, cause.getMessage(), "Forge",
                                                   JOptionPane.ERROR_MESSAGE);
                 } finally {
-                    if (task == this)
+                    if (task == this) {
                         busy = false;
+                        progressBar.setIndeterminate(false);
+                        progressBar.setValue(0);
+                    }
                 }
             }
         };
@@ -307,6 +364,8 @@ public final class Main {
                 content.setTitleAt(1, "Investigator notes");
                 showEvidence(r);
                 filesModel.clear();
+                resultsModel.clear();
+                resultData.clear();
                 commitsModel.clear();
                 commitData.clear();
                 activeKind = "";
@@ -325,11 +384,39 @@ public final class Main {
                            r.get("warning"));
             });
     }
-    private void refresh() {
+    private void appendJob(String message) {
+        if (jobs.getDocument().getLength() > 32000) jobs.setText("");
+        jobs.append(java.time.LocalTime.now().withNano(0) + "  " + message + "\n");
+    }
+    static void highlightLine(JTextArea target, int number) {
+        try {
+            int line = Math.max(0, Math.min(number - 1, target.getLineCount() - 1));
+            int start = target.getLineStartOffset(line), end = target.getLineEndOffset(line);
+            target.getHighlighter().removeAllHighlights();
+            target.getHighlighter().addHighlight(start, end,
+                new javax.swing.text.DefaultHighlighter.DefaultHighlightPainter(new Color(61, 64, 71)));
+            target.setCaretPosition(start);
+        } catch (javax.swing.text.BadLocationException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+    private void changes() {
+        run("Reading index changes", () -> bridge.call(workspace, "changes", Map.of()), r -> {
+            StringBuilder out = new StringBuilder("Latest nonempty index changes\nExact-content renames only. Refresh to inspect current files.\n\n");
+            for (Map<String, Object> change : maps(r, "changes")) {
+                out.append(str(change, "kind")).append("  ").append(str(change, "path"));
+                if (!str(change, "previous").isEmpty()) out.append("  ← ").append(str(change, "previous"));
+                out.append('\n');
+            }
+            inspect("index-changes", context.getText(), out.toString());
+        });
+    }
+    private void refresh() { refresh(false); }
+    private void refresh(boolean rebuild) {
         if (!idle())
             return;
         run("Refreshing repository", () -> {
-            Map<String, Object> r = bridge.call(workspace, "files", Map.of());
+            Map<String, Object> r = bridge.call(workspace, "files", Map.of("rebuild", rebuild));
             r.put("history", bridge.call(workspace, "history", Map.of()));
             return r;
         }, this::showRepository);
@@ -337,6 +424,8 @@ public final class Main {
     @SuppressWarnings("unchecked")
     private void showRepository(Map<String, Object> r) {
         filesModel.clear();
+        resultsModel.clear();
+        resultData.clear();
         for (Object path : (List<?>)r.get("files"))
             filesModel.addElement(path.toString());
         commitData.clear();
@@ -352,6 +441,13 @@ public final class Main {
             Boolean.TRUE.equals(r.get("limited"))
                 ? "File list capped at 20,000; inspect a smaller repository."
                 : "Repository loaded. Double-check evidence before drawing conclusions.");
+        if (r.containsKey("index_warning")) {
+            status.setText("Browsing available · " + str(r, "index_warning"));
+            appendJob("INDEX  " + str(r, "index_warning"));
+        }
+        if (r.get("index") instanceof Map<?, ?> stats)
+            appendJob("INDEX  " + stats.get("reused") + " reused · " + stats.get("updated") +
+                      " read · " + stats.get("skipped") + " skipped · " + stats.get("bytes") + " bytes");
         inspect("git-status", str(r, "repository"),
                 "Working tree changes (tracked files):\n\n" +
                     (str(r, "status").isBlank() ? "Clean" : str(r, "status")));
@@ -361,6 +457,7 @@ public final class Main {
         activeSource = origin;
         activeText = text;
         source.setText(kind.toUpperCase(Locale.ROOT) + "  /  " + origin);
+        viewer.getHighlighter().removeAllHighlights();
         viewer.setText(text);
         viewer.setCaretPosition(0);
         content.setSelectedIndex(0);
@@ -369,6 +466,12 @@ public final class Main {
         String term = query.getText();
         run("Searching repository",
             () -> bridge.call(workspace, "search", Map.of("query", term)), r -> {
+                resultsModel.clear();
+                resultData.clear();
+                resultData.addAll(maps(r, "hits"));
+                for (Map<String, Object> hit : resultData)
+                    resultsModel.addElement(str(hit, "path") + ":" + hit.get("line") + "  " + str(hit, "text"));
+                navigation.setSelectedIndex(3);
                 StringBuilder out = new StringBuilder("Literal search: " + term + "\n\n");
                 for (Map<String, Object> hit : maps(r, "hits"))
                     out.append(str(hit, "path"))
@@ -382,6 +485,9 @@ public final class Main {
                     .append(" · Skipped files: ")
                     .append(r.get("skipped"));
                 inspect("search", context.getText() + " / query=" + term, out.toString());
+                status.setText(resultData.size() + " matches · select a result to jump to its line" +
+                    (Boolean.TRUE.equals(r.get("limited")) ? " · truncated at 300" : "") +
+                    " · skipped files: " + r.get("skipped"));
             });
     }
     private void importDump() {

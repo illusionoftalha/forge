@@ -8,7 +8,7 @@ Forge is a local desktop workbench for investigating software failures. Open a G
 
 ![Forge desktop with the synthetic lock-order incident](workbench.png)
 
-**Version 0.1 is the first working milestone.** It implements repository inspection, monitor-cycle analysis, persistent evidence, and incident export. It does not yet implement the full code-intelligence roadmap.
+Version 0.2 adds a persistent repository index to the investigation workflow.
 
 ## What works
 
@@ -80,9 +80,16 @@ Exports can contain source code, local paths, commit metadata, and stack traces.
 
 ## Practical limits
 
+Open, refresh, and search synchronize the workspace index. Choose a match in **Results** to open its file with the line highlighted. If the content has changed since the search, Forge opens the current file and asks you to search again.
+
+**Jobs & index → View changes** shows the last nonempty difference between completed index refreshes. On the first refresh, eligible files appear as additions. A rename requires one removed path and one added path with identical decoded content; ambiguous moves appear as additions and removals. This view compares working-tree observations, not historical Git commits. **Rebuild index** forces every eligible file to be read, including files whose timestamps were restored manually.
+
+The workspace now stores indexed source text, including eligible untracked files. Keep the workspace outside the inspected repository. Share a selected HTML export instead of the entire workspace when you only intend to share captured evidence. Opening a 0.1 workspace upgrades it to schema 2; make a copy first if you need to reopen it with an older release.
+
 - Preview and imported dump limit: **2 MiB** each.
 - File listing: **20,000** entries; Git ignore rules and common dependency/build directories are skipped.
-- Search: **300** hits and approximately **32 MiB** of decoded text per request. A truncation indicator makes partial results explicit.
+- Index: **32 MiB** of UTF-8 text, **20,000** listed paths and a **22-second** refresh budget. When the index is too large, browsing and existing evidence remain available. Search reports the limit instead of returning a partial index. Binary, unreadable, missing and oversized files are skipped.
+- Search: **300** line matches; the result summary reports truncation and skipped files. Search scans cached text after checking file metadata.
 - Git output: **4 MiB**, with a **15-second** deadline.
 - Desktop worker deadline: **30 seconds**. Cancellation terminates an active worker and its child processes; already-committed SQLite writes remain saved.
 - One desktop instance per workspace is the supported editing model.

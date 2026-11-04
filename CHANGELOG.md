@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- Reuse unchanged source files across searches, refreshes, and restarts.
+- Inspect additions, edits, removals, and unambiguous exact-content renames.
+- Select a search hit to highlight its source line. Changed files prompt a new search.
+- Read live indexing progress and review operation outcomes in **Jobs & index**.
+- Upgrade existing workspaces to schema 2 while preserving evidence and notes. A cancelled index transaction leaves the prior completed index intact.
+
 ## 0.1.1
 
 - Shorter README with a monochrome cover; full instructions moved to the user guide.

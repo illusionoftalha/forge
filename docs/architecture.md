@@ -8,7 +8,7 @@ Each operation launches one Python process, writes one JSON request to stdin, cl
 
 ## Persistence
 
-`forge.sqlite` contains settings, a single notebook, and append-only evidence records. `PRAGMA user_version` identifies schema version 1. A newer workspace version is rejected rather than downgraded. Notes update in a SQLite transaction. Captures have a source string, kind, timestamp, and SHA-256 over captured text.
+`forge.sqlite` contains settings, a notebook, append-only evidence, a source cache and the last nonempty index change set. Opening a schema 1 workspace creates the index tables and advances `user_version` to 2 in a transaction. A newer workspace version is rejected. Captures retain a source, kind, timestamp, and SHA-256 over captured text.
 
 There is currently no evidence deletion, editing, deduplication, or cross-workspace sync. Switching repositories within a workspace keeps previous evidence; source references distinguish it. Use separate workspaces for unrelated investigations.
 
@@ -26,6 +26,8 @@ Worker stdout is redirected to a temporary file, avoiding pipe deadlocks. Reques
 
 ## Cost and future direction
 
-File contents and search results are not persistently indexed. A search scans eligible files within fixed budgets. This keeps the first milestone inspectable but makes repeat searches slower than a proper incremental index. Add an index only with measured workloads, invalidation tests, and explicit cancellation semantics.
+One transaction owns each source-cache refresh. Forge lists eligible files through Git, compares size, timestamps and file identity, then rereads changed entries. A forced rebuild bypasses the metadata check. Source and change rows commit together; a killed worker rolls back through SQLite recovery when the workspace reopens. A single workspace caches one repository at a time. Search streams one cached document at a time and compares case-folded text; there is no inverted or symbol index.
+
+The reproducible workload in `python scripts/benchmark_index.py` creates 1,000 files totaling 17,000,000 bytes. On Windows 11 with Python 3.14.4 (Intel family 6, model 60), a traced run took 15.55 s cold, 1.11 s unchanged and 1.10 s after one edit. It reread 1,000, zero and one file respectively. Peak traced Python allocations were 4.14 MiB or less in each pass; this excludes native SQLite memory and the OS cache. Timings are a sample, not a latency guarantee.
 
 The desktop currently uses a small JSON codec tested at the protocol boundary. If the protocol grows substantially, replace it with a maintained library rather than extending it into a general serialization framework.

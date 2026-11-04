@@ -10,7 +10,7 @@ Inspect a Git change, analyze a JVM thread dump, and keep the evidence together.
 
 ### One investigation, start to finish
 
-**Inspect** source files, search a repository, and read commit patches.  
+**Inspect** a patch, track renamed files, or jump from a search result to its source line.<br>
 **Capture** thread analysis and source snapshots with timestamps and content hashes.  
 **Explain** the finding in a persistent notebook, then export a standalone HTML report.
 
@@ -37,7 +37,7 @@ The synthetic repository contains a lock-order regression. Inspect its commit, i
 
 ### Scope
 
-This preview covers Git inspection, JVM monitor analysis, saved evidence, and incident reports. Symbol navigation, incremental indexing, and log timelines are future milestones. Input limits and analysis boundaries are documented in the user guide.
+The repository index refreshes locally and reuses unchanged files. Search covers up to 32 MiB of text. Symbol navigation and log timelines are on the roadmap.
 
 <p>
   <a href="docs/architecture.md"><img src="docs/assets/architecture.svg" alt="Architecture" height="34" /></a>&nbsp;
