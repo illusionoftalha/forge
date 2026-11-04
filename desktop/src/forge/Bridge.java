@@ -41,12 +41,20 @@ public final class Bridge {
                 throw new IOException("Worker stopped: " +
                                       raw.substring(0, Math.min(raw.length(), 600)));
             Object parsed = Json.parse(raw);
-            if(!(parsed instanceof Map<?,?> response) || !Boolean.TRUE.equals(response.get("ok")))
-                throw new IOException(parsed instanceof Map<?,?> response ? String.valueOf(response.get("error")) : "Invalid worker response");
-            return (Map<String, Object>)response.get("data");
+            if (!(parsed instanceof Map<?, ?> response))
+                throw new IOException("Invalid worker response");
+            if (!Objects.equals(response.get("version"), java.math.BigDecimal.ONE))
+                throw new IOException("Unsupported worker protocol version");
+            if (!Boolean.TRUE.equals(response.get("ok")))
+                throw new IOException(String.valueOf(response.get("error")));
+            if (!(response.get("data") instanceof Map<?, ?> data))
+                throw new IOException("Worker response must contain an object");
+            return (Map<String, Object>)data;
         } finally {
-            if (process != null)
+            if (process != null) {
                 stop(process);
+                process.waitFor(3, TimeUnit.SECONDS);
+            }
             active = null;
             Files.deleteIfExists(output);
         }

@@ -16,9 +16,8 @@ import javax.swing.border.EmptyBorder;
 
 /** Forge 0.1: a complete repository-to-incident workflow. */
 public final class Main {
-    private static final Color BG = new Color(17, 24, 32), PANEL = new Color(26, 36, 48),
-                               TEXT = new Color(228, 233, 237), MUTED = new Color(152, 168, 184),
-                               ACCENT = new Color(233, 185, 117);
+    private static final Color BG = Theme.BACKGROUND, PANEL = Theme.SURFACE, TEXT = Theme.INK,
+                               MUTED = Theme.MUTED, ACCENT = Theme.INK;
     private final Path home =
         Path.of(System.getProperty("forge.home", System.getProperty("user.dir"))).toAbsolutePath();
     private Path workspace = home.resolve("forge-workspace");
@@ -46,7 +45,10 @@ public final class Main {
     private static JTextArea area(boolean editable) {
         JTextArea text = new JTextArea();
         text.setEditable(editable);
-        text.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
+        Font codeFont = new Font("Consolas", Font.PLAIN, 14);
+        text.setFont(codeFont.getFamily().equalsIgnoreCase("Consolas")
+                         ? codeFont
+                         : new Font(Font.MONOSPACED, Font.PLAIN, 14));
         text.setBackground(BG);
         text.setForeground(TEXT);
         text.setCaretColor(ACCENT);
@@ -64,8 +66,8 @@ public final class Main {
         root.setBackground(BG);
         JPanel top = new JPanel(new BorderLayout(0, 12));
         top.setOpaque(false);
-        JLabel brand = new JLabel("FORGE  /  SOFTWARE INVESTIGATIONS");
-        brand.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 23));
+        JLabel brand = new JLabel("FORGE");
+        brand.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 30));
         brand.setForeground(TEXT);
         context.setForeground(MUTED);
         JPanel heading = new JPanel(new GridLayout(2, 1, 0, 8));
@@ -98,7 +100,8 @@ public final class Main {
         left.setOpaque(false);
         query.setToolTipText("Literal case-insensitive repository search; Enter to run");
         query.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(53, 65, 80)), new EmptyBorder(8, 10, 8, 10)));
+            BorderFactory.createLineBorder(Theme.BORDER), new EmptyBorder(8, 10, 8, 10)));
+        query.getAccessibleContext().setAccessibleName("Search repository text");
         query.addActionListener(e -> search());
         JPanel find = new JPanel(new BorderLayout(6, 0));
         find.setOpaque(false);
@@ -126,10 +129,19 @@ public final class Main {
         for (JList<String> list : List.of(files, commits, evidence)) {
             list.setBackground(PANEL);
             list.setForeground(TEXT);
-            list.setSelectionBackground(new Color(68, 62, 49));
+            list.setSelectionBackground(new Color(47, 49, 55));
             list.setSelectionForeground(TEXT);
             list.setFixedCellHeight(32);
             list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            list.setCellRenderer(new DefaultListCellRenderer() {
+                public Component getListCellRendererComponent(
+                    JList<?> owner, Object value, int index, boolean selected, boolean focused) {
+                    JLabel label = (JLabel)super.getListCellRendererComponent(owner, value, index,
+                                                                              selected, focused);
+                    label.setBorder(new EmptyBorder(0, 12, 0, 12));
+                    return label;
+                }
+            });
         }
         files.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting() && files.getSelectedValue() != null && idle()) {
@@ -171,6 +183,7 @@ public final class Main {
                 }
             }
         });
+        Theme.apply(root);
         frame.addWindowListener(new WindowAdapter() {
             public void windowClosing(WindowEvent e) {
                 if (!idle()) {
@@ -207,13 +220,9 @@ public final class Main {
         cancelled = false;
         task = new SwingWorker<T, Void>() {
             protected T doInBackground() throws Exception {
-                try {
-                    if (cancelled)
-                        return null;
-                    return work.call();
-                } finally {
-                    busy = false;
-                }
+                if (cancelled)
+                    return null;
+                return work.call();
             }
             protected void done() {
                 try {
@@ -231,6 +240,9 @@ public final class Main {
                     status.setText("Failed: " + cause.getMessage());
                     JOptionPane.showMessageDialog(frame, cause.getMessage(), "Forge",
                                                   JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    if (task == this)
+                        busy = false;
                 }
             }
         };
@@ -443,26 +455,6 @@ public final class Main {
                 status.setText("Report saved: " + r.get("path"));
             });
     }
-    private static void theme() {
-        var font = new javax.swing.plaf.FontUIResource(Font.SANS_SERIF, Font.PLAIN, 13);
-        for (Object key : Collections.list(UIManager.getDefaults().keys()))
-            if (UIManager.get(key) instanceof javax.swing.plaf.FontUIResource)
-                UIManager.put(key, font);
-        for (String widget : List.of("Panel", "Button", "ComboBox", "TabbedPane", "TextField",
-                                     "ScrollPane", "Viewport", "List")) {
-            UIManager.put(widget + ".background", PANEL);
-            UIManager.put(widget + ".foreground", TEXT);
-        }
-        UIManager.put("Label.foreground", TEXT);
-        UIManager.put("Button.gradient", List.of(0f, 0f, PANEL, PANEL, PANEL));
-        UIManager.put("TabbedPane.selected", BG);
-        UIManager.put("TabbedPane.contentAreaColor", BG);
-        UIManager.put("TabbedPane.borderHightlightColor", PANEL);
-        UIManager.put("TabbedPane.light", PANEL);
-        UIManager.put("TabbedPane.highlight", PANEL);
-        UIManager.put("TabbedPane.darkShadow", PANEL);
-        UIManager.put("ScrollPane.border", BorderFactory.createLineBorder(new Color(53, 65, 80)));
-    }
     private static void layout(Container c) {
         c.doLayout();
         if (c instanceof JSplitPane split) {
@@ -474,7 +466,7 @@ public final class Main {
                 layout(container);
     }
     public static void main(String[] args) throws Exception {
-        theme();
+        Theme.install();
         if (args.length == 2 && args[0].equals("--render")) {
             SwingUtilities.invokeAndWait(() -> {
                 Main app = new Main();
@@ -483,7 +475,7 @@ public final class Main {
                     app.inspect("jvm-thread-dump", "fixtures/incident.txt",
                                 Dump.parse(dump).report() + "\nORIGINAL SNAPSHOT\n" + dump);
                     app.context.setText(
-                        "DEMO INCIDENT  /  Lock-order inversion in the settlement service");
+                        "Local investigation  /  Settlement service · demo fixture");
                     app.filesModel.addElement("src/Settlement.java");
                     app.filesModel.addElement("src/Journal.java");
                     app.filesModel.addElement("README.md");
@@ -491,14 +483,16 @@ public final class Main {
                     app.evidenceModel.addElement("#1  git-diff · regression commit");
                     app.navigation.setSelectedIndex(2);
                     app.notes.setText(
-                        "Two workers acquire Account and Journal in opposite order.\nThe " +
-                        "imported snapshot shows a two-thread monitor cycle.\nNext step: enforce " +
-                        "one lock acquisition order and retest.");
+                        "Two workers acquire Account and Journal in opposite order.\nThe "
+                        + "imported snapshot shows a two-thread monitor cycle.\nNext step: enforce "
+                        + "one lock acquisition order and retest.");
                     Container pane = app.frame.getContentPane();
                     pane.setSize(1400, 900);
                     layout(pane);
                     BufferedImage image = new BufferedImage(1400, 900, BufferedImage.TYPE_INT_RGB);
                     Graphics2D g = image.createGraphics();
+                    g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                                       RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
                     pane.printAll(g);
                     g.dispose();
                     ImageIO.write(image, "png", new File(args[1]));

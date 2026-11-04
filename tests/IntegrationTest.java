@@ -3,6 +3,7 @@ package forge;
 import forge.analysis.Dump;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.*;
 
 public final class IntegrationTest {
     private static void check(boolean value, String message) {
@@ -46,8 +47,53 @@ public final class IntegrationTest {
             reopened.call(workspace, "export", Map.of("path", exported.toString()));
             check(Files.readString(exported).contains("settlement-worker"),
                   "export includes evidence");
-            System.out.println(
-                "Java protocol, worker integration, workspace restore and incident export passed.");
+            Path fakeHome = workspace.resolve("fake-home");
+            Files.createDirectories(fakeHome.resolve("analysis"));
+            Path fakeWorker = fakeHome.resolve("analysis/worker.py");
+            Files.writeString(fakeWorker, "print('{\"version\":99,\"ok\":true,\"data\":{}}')\n");
+            Bridge fake = new Bridge(fakeHome);
+            boolean versionRejected = false;
+            try {
+                fake.call(workspace, "state", Map.of());
+            } catch (java.io.IOException expected) {
+                versionRejected = expected.getMessage().contains("protocol version");
+            }
+            check(versionRejected, "reject unsupported worker protocol");
+            Files.writeString(fakeWorker,
+                              "import " +
+                              "sys,time,pathlib\nsys.stdin.read()\npathlib.Path(__file__).with_" +
+                              "suffix('.started').touch()\ntime.sleep(60)\n");
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> pending = executor.submit(() -> {
+                    try {
+                        fake.call(workspace, "state", Map.of());
+                        throw new AssertionError("cancelled worker succeeded");
+                    } catch (java.io.IOException expected) {
+                        return;
+                    } catch (Exception error) {
+                        throw new RuntimeException(error);
+                    }
+                });
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (!Files.exists(fakeHome.resolve("analysis/worker.started")) &&
+                       System.nanoTime() < deadline)
+                    Thread.sleep(20);
+                check(Files.exists(fakeHome.resolve("analysis/worker.started")),
+                      "test worker started");
+                fake.cancel();
+                pending.get(5, TimeUnit.SECONDS);
+                try (var children = Files.list(workspace)) {
+                    check(children.noneMatch(
+                              p -> p.getFileName().toString().startsWith("forge-worker-")),
+                          "cancel cleans up response file");
+                }
+            } finally {
+                fake.cancel();
+                executor.shutdownNow();
+            }
+            System.out.println("Java protocol, workspace restore, incident export and worker " +
+                               "cancellation passed.");
         } finally {
             try (var paths = Files.walk(workspace)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList())

@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
-mkdir -p build/classes
-javac -encoding UTF-8 -d build/classes desktop/src/forge/*.java desktop/src/forge/analysis/*.java tests/IntegrationTest.java
+mkdir -p build/classes build/test-classes
+javac -encoding UTF-8 -d build/classes desktop/src/forge/*.java desktop/src/forge/analysis/*.java
+javac -encoding UTF-8 -cp build/classes -d build/test-classes tests/IntegrationTest.java
 python -m unittest discover -s tests -v
-java -cp build/classes forge.IntegrationTest
-jar --create --file build/forge.jar --main-class forge.Main -C build/classes forge
+java -cp build/test-classes:build/classes forge.IntegrationTest
+python scripts/package_classes.py
