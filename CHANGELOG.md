@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Redesign the desktop around the repository sidebar and document inspector.
+- Show thread, monitor wait, and cycle counts above the snapshot report.
+- Put capture and notebook actions beside their content and show cancellation during active jobs.
+
 ## 0.2.0
 
 - Reuse unchanged source files across searches, refreshes, and restarts.

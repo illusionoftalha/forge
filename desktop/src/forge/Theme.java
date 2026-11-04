@@ -14,6 +14,22 @@ final class Theme {
     static final Color INK = new Color(231, 232, 235);
     static final Color MUTED = new Color(149, 153, 162);
 
+    static final class Mark implements Icon {
+        public int getIconWidth() { return 34; }
+        public int getIconHeight() { return 34; }
+        public void paintIcon(Component c, Graphics graphics, int x, int y) {
+            Graphics2D g = (Graphics2D)graphics.create();
+            g.translate(x, y);
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(INK);
+            g.fillRoundRect(0, 0, 34, 34, 10, 10);
+            g.setColor(BACKGROUND);
+            g.fillPolygon(new int[]{7, 25, 23, 10}, new int[]{8, 8, 12, 12}, 4);
+            g.fillPolygon(new int[]{10, 23, 21, 15, 15, 10}, new int[]{15, 15, 19, 19, 26, 26}, 6);
+            g.dispose();
+        }
+    }
+
     static void install() {
         System.setProperty("awt.useSystemAAFontSettings", "on");
         System.setProperty("swing.aatext", "true");
@@ -34,21 +50,28 @@ final class Theme {
 
     static void apply(Component component) {
         if (component instanceof JButton button) {
-            button.setUI(new BasicButtonUI());
-            button.setBackground(SURFACE);
-            button.setForeground(INK);
-            button.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(BORDER), new EmptyBorder(8, 12, 8, 12)));
-            button.addFocusListener(new java.awt.event.FocusAdapter() {
-                public void focusGained(java.awt.event.FocusEvent e) {
-                    button.setBorder(BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(MUTED), new EmptyBorder(8, 12, 8, 12)));
-                }
-                public void focusLost(java.awt.event.FocusEvent e) {
-                    button.setBorder(BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(BORDER), new EmptyBorder(8, 12, 8, 12)));
+            boolean primary = Boolean.TRUE.equals(button.getClientProperty("primary"));
+            button.setUI(new BasicButtonUI() {
+                public void paint(Graphics graphics, JComponent component) {
+                    Graphics2D g = (Graphics2D)graphics.create();
+                    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    boolean hover = button.getModel().isRollover();
+                    boolean pressed = button.getModel().isPressed();
+                    Color fill = primary && button.isEnabled() ? (pressed ? MUTED : INK)
+                        : pressed ? BORDER : hover ? new Color(48, 50, 55) : new Color(34, 35, 39);
+                    g.setColor(fill);
+                    g.fillRoundRect(0, 0, button.getWidth(), button.getHeight(), 9, 9);
+                    g.setColor(button.isFocusOwner() ? MUTED : primary && button.isEnabled() ? fill : BORDER);
+                    g.drawRoundRect(0, 0, button.getWidth()-1, button.getHeight()-1, 9, 9);
+                    g.dispose();
+                    super.paint(graphics, component);
                 }
             });
+            button.setRolloverEnabled(true);
+            button.setOpaque(false);
+            button.setContentAreaFilled(false);
+            button.setForeground(primary ? BACKGROUND : INK);
+            button.setBorder(new EmptyBorder(8, 12, 8, 12));
         }
         if (component instanceof JTabbedPane tabs) {
             tabs.setUI(new Tabs());
@@ -68,6 +91,7 @@ final class Theme {
                 }
             });
         }
+        if (component instanceof JSplitPane split) split.setBorder(null);
         if (component instanceof JScrollPane scroll) {
             scroll.setBorder(BorderFactory.createLineBorder(BORDER));
             scroll.getViewport().setBackground(BACKGROUND);
@@ -96,7 +120,7 @@ final class Theme {
     private static final class Tabs extends BasicTabbedPaneUI {
         protected void installDefaults() {
             super.installDefaults();
-            tabInsets = new Insets(10, 15, 10, 15);
+            tabInsets = new Insets(9, 9, 9, 9);
             tabAreaInsets = new Insets(0, 0, 8, 0);
             contentBorderInsets = new Insets(0, 0, 0, 0);
         }

@@ -41,6 +41,10 @@ public final class Main {
     private final List<Map<String, Object>> resultData = new ArrayList<>();
     private final JTextArea jobs = area(false);
     private final JProgressBar progressBar = new JProgressBar();
+    private final JPanel metrics = new JPanel(new GridLayout(1, 3, 1, 0));
+    private final JLabel documentTitle = new JLabel("Open a repository to begin");
+    private final JButton cancel = new JButton("Cancel");
+    private final JButton capture = new JButton("Capture evidence");
     private SwingWorker<?, ?> task;
     private volatile boolean busy;
     private volatile boolean cancelled;
@@ -63,40 +67,29 @@ public final class Main {
     }
     private Main() {
         frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
-        frame.setSize(1400, 900);
-        frame.setMinimumSize(new Dimension(1100, 700));
+        Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        frame.setMinimumSize(new Dimension(Math.min(880, screen.width), Math.min(580, screen.height)));
+        frame.setSize(Math.min(1320, screen.width), Math.min(840, screen.height));
         frame.setLocationRelativeTo(null);
         JPanel root = new JPanel(new BorderLayout(0, 16));
-        root.setBorder(new EmptyBorder(24, 24, 16, 24));
+        root.setBorder(new EmptyBorder(18, 22, 12, 22));
         root.setBackground(BG);
-        JPanel top = new JPanel(new BorderLayout(0, 12));
+        JPanel top = new JPanel(new BorderLayout(20, 0));
         top.setOpaque(false);
-        JLabel brand = new JLabel("FORGE");
-        brand.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 30));
-        brand.setForeground(TEXT);
+        top.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER), new EmptyBorder(0, 0, 14, 0)));
+        JLabel brand = new JLabel("Forge", new Theme.Mark(), SwingConstants.LEFT);
+        brand.setFont(brand.getFont().deriveFont(Font.BOLD, 22f));
+        brand.setIconTextGap(10);
+        top.add(brand, BorderLayout.WEST);
         context.setForeground(MUTED);
-        JPanel heading = new JPanel(new GridLayout(2, 1, 0, 8));
-        heading.setOpaque(false);
-        heading.add(brand);
-        heading.add(context);
-        top.add(heading, BorderLayout.NORTH);
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 7, 0));
+        top.add(context, BorderLayout.CENTER);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         actions.setOpaque(false);
         button(actions, "Workspace", this::chooseWorkspace);
         button(actions, "Open repository", this::chooseRepository);
-        button(actions, "Refresh", this::refresh);
-        button(actions, "Import thread dump", this::importDump);
-        button(actions, "Capture evidence", this::capture);
-        button(actions, "Save notes", this::saveNotes);
         button(actions, "Export report", this::export);
-        button(actions, "Cancel", () -> {
-            if (busy) {
-                cancelled = true;
-                bridge.cancel();
-                status.setText("Cancelling. Existing saved evidence is preserved.");
-            }
-        });
-        top.add(actions, BorderLayout.SOUTH);
+        top.add(actions, BorderLayout.EAST);
         root.add(top, BorderLayout.NORTH);
         navigation.addTab("Files", new JScrollPane(files));
         navigation.addTab("Commits", new JScrollPane(commits));
@@ -115,26 +108,78 @@ public final class Main {
         JButton search = new JButton("Search");
         search.addActionListener(e -> search());
         find.add(search, BorderLayout.EAST);
-        left.add(find, BorderLayout.NORTH);
+        JPanel explorer = new JPanel(new BorderLayout(0, 12));
+        JLabel explorerTitle = new JLabel("Repository");
+        explorerTitle.setFont(explorerTitle.getFont().deriveFont(Font.BOLD, 18f));
+        JPanel explorerHeading = new JPanel(new BorderLayout());
+        explorerHeading.add(explorerTitle, BorderLayout.WEST);
+        JButton refresh = new JButton("Refresh");
+        refresh.addActionListener(e -> refresh());
+        explorerHeading.add(refresh, BorderLayout.EAST);
+        explorer.add(explorerHeading, BorderLayout.NORTH);
+        explorer.add(find, BorderLayout.SOUTH);
+        left.setOpaque(true);
+        left.setBackground(PANEL);
+        left.setBorder(new EmptyBorder(14, 14, 14, 14));
+        left.setMinimumSize(new Dimension(270, 180));
+        left.setPreferredSize(new Dimension(325, 400));
+        left.add(explorer, BorderLayout.NORTH);
         left.add(navigation, BorderLayout.CENTER);
         JPanel display = new JPanel(new BorderLayout(0, 8));
         display.setOpaque(false);
-        source.setForeground(ACCENT);
-        display.add(source, BorderLayout.NORTH);
+        source.setForeground(MUTED);
+        source.setFont(source.getFont().deriveFont(12f));
+        documentTitle.setFont(documentTitle.getFont().deriveFont(Font.BOLD, 24f));
+        JPanel identity = new JPanel(new GridLayout(2, 1));
+        identity.add(documentTitle);
+        identity.add(source);
+        JPanel tools = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        button(tools, "Import thread dump", this::importDump);
+        capture.putClientProperty("primary", true);
+        capture.addActionListener(e -> capture());
+        capture.setEnabled(false);
+        tools.add(capture);
+        JPanel sheet = new JPanel(new BorderLayout(10, 12));
+        sheet.setBorder(new EmptyBorder(14, 18, 14, 14));
+        sheet.add(identity, BorderLayout.CENTER);
+        sheet.add(tools, BorderLayout.EAST);
+        metrics.setVisible(false);
+        metrics.setBackground(Theme.BORDER);
+        sheet.add(metrics, BorderLayout.SOUTH);
+        display.add(sheet, BorderLayout.NORTH);
         display.add(new JScrollPane(viewer), BorderLayout.CENTER);
         content.addTab("Inspector", display);
-        content.addTab("Investigator notes", new JScrollPane(notes));
+        JPanel notebook = new JPanel(new BorderLayout(0, 8));
+        JPanel noteActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        button(noteActions, "Save notes", this::saveNotes);
+        notebook.add(noteActions, BorderLayout.NORTH);
+        notebook.add(new JScrollPane(notes), BorderLayout.CENTER);
+        content.addTab("Investigator notes", notebook);
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, content);
-        split.setResizeWeight(.28);
+        content.setMinimumSize(new Dimension(320, 200));
+        split.setResizeWeight(.20);
         split.setDividerSize(10);
         split.setBorder(null);
+        split.setDividerLocation(325);
         root.add(split, BorderLayout.CENTER);
         status.setForeground(MUTED);
         JPanel footer = new JPanel(new BorderLayout(16, 0));
         footer.setOpaque(false);
         progressBar.setPreferredSize(new Dimension(180, 6));
         footer.add(status, BorderLayout.CENTER);
-        footer.add(progressBar, BorderLayout.EAST);
+        JPanel activity = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        activity.setOpaque(false);
+        progressBar.setForeground(TEXT);
+        progressBar.setVisible(false);
+        activity.add(progressBar);
+        cancel.setVisible(false);
+        cancel.addActionListener(e -> {
+            cancelled = true;
+            bridge.cancel();
+            status.setText("Cancelling current job…");
+        });
+        activity.add(cancel);
+        footer.add(activity, BorderLayout.EAST);
         root.add(footer, BorderLayout.SOUTH);
         JPanel jobPanel = new JPanel(new BorderLayout(0, 8));
         JPanel indexActions = new JPanel(new FlowLayout(FlowLayout.LEFT, 7, 0));
@@ -262,6 +307,8 @@ public final class Main {
         }
         status.setText(label + " …");
         busy = true;
+        cancel.setVisible(true);
+        progressBar.setVisible(true);
         long started = System.nanoTime();
         appendJob("RUNNING  " + label);
         progressBar.setIndeterminate(true);
@@ -297,6 +344,8 @@ public final class Main {
                 } finally {
                     if (task == this) {
                         busy = false;
+                        cancel.setVisible(false);
+                        progressBar.setVisible(false);
                         progressBar.setIndeterminate(false);
                         progressBar.setValue(0);
                     }
@@ -372,7 +421,10 @@ public final class Main {
                 activeSource = "";
                 activeText = "";
                 viewer.setText("");
-                source.setText("EVIDENCE VIEWER");
+                source.setText("Choose Open repository or import a thread dump.");
+                documentTitle.setText("Start an investigation");
+                metrics.setVisible(false);
+                capture.setEnabled(false);
                 context.setText("Workspace: " + workspace);
         if(r.get("listing") instanceof Map<?,?> listing){
             @SuppressWarnings("unchecked") Map<String, Object> data = (Map<String, Object>)listing;
@@ -452,13 +504,47 @@ public final class Main {
                 "Working tree changes (tracked files):\n\n" +
                     (str(r, "status").isBlank() ? "Clean" : str(r, "status")));
     }
+    private static final java.util.regex.Pattern SNAPSHOT_COUNTS = java.util.regex.Pattern.compile(
+        "THREADSCOPE / snapshot analysis\n\n([0-9]+) threads · ([0-9]+) monitor waits · ([0-9]+) monitor cycles\n\n");
     private void inspect(String kind, String origin, String text) {
         activeKind = kind;
         activeSource = origin;
         activeText = text;
-        source.setText(kind.toUpperCase(Locale.ROOT) + "  /  " + origin);
+        String title = switch (kind) {
+            case "jvm-thread-dump" -> "Thread snapshot";
+            case "git-status" -> "Working tree";
+            case "git-diff" -> "Commit patch";
+            case "index-changes" -> "Index changes";
+            case "search" -> "Search results";
+            case "source" -> "Source file";
+            default -> kind;
+        };
+        documentTitle.setText(title);
+        source.setText(origin);
+        source.setToolTipText(origin);
+        capture.setEnabled(true);
+        metrics.removeAll();
+        var counts = SNAPSHOT_COUNTS.matcher(text);
+        boolean summary = kind.equals("jvm-thread-dump") && counts.lookingAt();
+        if (summary) {
+            for (int i = 1; i <= 3; i++) {
+                JPanel metric = new JPanel(new BorderLayout(0, 3));
+                metric.setBorder(new EmptyBorder(10, 14, 10, 10));
+                metric.setBackground(BG);
+                JLabel value = new JLabel(counts.group(i));
+                value.setFont(value.getFont().deriveFont(Font.BOLD, 23f));
+                String noun = List.of("Thread", "Monitor wait", "Monitor cycle").get(i - 1);
+                JLabel label = new JLabel(counts.group(i).equals("1") ? noun : noun + "s");
+                label.setForeground(MUTED);
+                metric.add(value, BorderLayout.NORTH);
+                metric.add(label, BorderLayout.SOUTH);
+                metrics.add(metric);
+            }
+        }
+        metrics.setVisible(summary);
+        metrics.revalidate();
         viewer.getHighlighter().removeAllHighlights();
-        viewer.setText(text);
+        viewer.setText(summary ? text.substring(counts.end()) : text);
         viewer.setCaretPosition(0);
         content.setSelectedIndex(0);
     }
@@ -588,6 +674,7 @@ public final class Main {
                     app.evidenceModel.addElement("#2  jvm-thread-dump · incident.txt");
                     app.evidenceModel.addElement("#1  git-diff · regression commit");
                     app.navigation.setSelectedIndex(2);
+                    app.evidence.setSelectedIndex(0);
                     app.notes.setText(
                         "Two workers acquire Account and Journal in opposite order.\nThe "
                         + "imported snapshot shows a two-thread monitor cycle.\nNext step: enforce "
