@@ -1,0 +1,55 @@
+2026-01-15 14:32:09
+Full thread dump OpenJDK 64-Bit Server VM (17.0 mixed mode):
+
+"settlement-worker" #21 prio=5 tid=0x001 nid=0x101 waiting for monitor entry
+   java.lang.Thread.State: BLOCKED (on object monitor)
+        at ledger.Settlement.commit(Settlement.java:84)
+        - waiting to lock <0x0000000b> (a ledger.Journal)
+        - locked <0x0000000a> (a ledger.Account)
+        at ledger.Worker.run(Worker.java:32)
+
+"journal-flusher" #22 prio=5 tid=0x002 nid=0x102 waiting for monitor entry
+   java.lang.Thread.State: BLOCKED (on object monitor)
+        at ledger.Journal.flush(Journal.java:61)
+        - waiting to lock <0x0000000a> (a ledger.Account)
+        - locked <0x0000000b> (a ledger.Journal)
+        at ledger.Worker.run(Worker.java:32)
+
+"http-request-18" #23 prio=5 tid=0x003 nid=0x103 waiting for monitor entry
+   java.lang.Thread.State: BLOCKED (on object monitor)
+        at ledger.Account.balance(Account.java:44)
+        - waiting to lock <0x0000000a> (a ledger.Account)
+        at http.Router.dispatch(Router.java:117)
+
+"http-request-19" #24 prio=5 tid=0x004 nid=0x104 waiting for monitor entry
+   java.lang.Thread.State: BLOCKED (on object monitor)
+        at ledger.Account.balance(Account.java:44)
+        - waiting to lock <0x0000000a> (a ledger.Account)
+        at http.Router.dispatch(Router.java:117)
+
+"metrics-publisher" #25 prio=5 tid=0x005 nid=0x105 waiting on condition
+   java.lang.Thread.State: TIMED_WAITING (sleeping)
+        at java.lang.Thread.sleep(java.base@17/Native Method)
+        at metrics.Publisher.run(Publisher.java:29)
+
+"queue-consumer" #26 prio=5 tid=0x006 nid=0x106 in Object.wait()
+   java.lang.Thread.State: WAITING (on object monitor)
+        at java.lang.Object.wait(java.base@17/Native Method)
+        - waiting on <0x0000000c> (a queue.Buffer)
+        at queue.Buffer.take(Buffer.java:52)
+        - locked <0x0000000c> (a queue.Buffer)
+
+"health-server" #27 prio=5 tid=0x007 nid=0x107 runnable
+   java.lang.Thread.State: RUNNABLE
+        at sun.nio.ch.Net.accept(java.base@17/Native Method)
+        at http.HealthServer.run(HealthServer.java:18)
+
+"compiler" #28 daemon prio=9 tid=0x008 nid=0x108 runnable
+   java.lang.Thread.State: RUNNABLE
+
+Found one Java-level deadlock:
+=============================
+"settlement-worker":
+  waiting to lock monitor, which is held by "journal-flusher"
+"journal-flusher":
+  waiting to lock monitor, which is held by "settlement-worker"
