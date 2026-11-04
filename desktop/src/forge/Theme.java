@@ -54,8 +54,11 @@ final class Theme {
             tabs.setUI(new Tabs());
             tabs.setBackground(BACKGROUND);
             tabs.setForeground(MUTED);
+            tabs.setOpaque(true);
         }
         if (component instanceof JSplitPane split) {
+            split.setBackground(BACKGROUND);
+            split.setOpaque(true);
             split.setUI(new BasicSplitPaneUI() {
                 public BasicSplitPaneDivider createDefaultDivider() {
                     BasicSplitPaneDivider divider = new BasicSplitPaneDivider(this);
