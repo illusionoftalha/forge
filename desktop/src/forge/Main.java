@@ -54,10 +54,7 @@ public final class Main {
     private static JTextArea area(boolean editable) {
         JTextArea text = new JTextArea();
         text.setEditable(editable);
-        Font codeFont = new Font("Consolas", Font.PLAIN, 14);
-        text.setFont(codeFont.getFamily().equalsIgnoreCase("Consolas")
-                         ? codeFont
-                         : new Font(Font.MONOSPACED, Font.PLAIN, 14));
+        text.setFont(Theme.preferredFont(16, Font.MONOSPACED, "Cascadia Mono", "Consolas", "DejaVu Sans Mono"));
         text.setBackground(BG);
         text.setForeground(TEXT);
         text.setCaretColor(ACCENT);
@@ -128,7 +125,7 @@ public final class Main {
         JPanel display = new JPanel(new BorderLayout(0, 8));
         display.setOpaque(false);
         source.setForeground(MUTED);
-        source.setFont(source.getFont().deriveFont(12f));
+        source.setFont(source.getFont().deriveFont(14f));
         documentTitle.setFont(documentTitle.getFont().deriveFont(Font.BOLD, 24f));
         JPanel identity = new JPanel(new GridLayout(2, 1));
         identity.add(documentTitle);
@@ -206,7 +203,7 @@ public final class Main {
             list.setForeground(TEXT);
             list.setSelectionBackground(new Color(47, 49, 55));
             list.setSelectionForeground(TEXT);
-            list.setFixedCellHeight(32);
+            list.setFixedCellHeight(37);
             list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
             list.setCellRenderer(new DefaultListCellRenderer() {
                 public Component getListCellRendererComponent(
@@ -544,6 +541,8 @@ public final class Main {
         metrics.setVisible(summary);
         metrics.revalidate();
         viewer.getHighlighter().removeAllHighlights();
+        viewer.setLineWrap(summary);
+        viewer.setWrapStyleWord(summary);
         viewer.setText(summary ? text.substring(counts.end()) : text);
         viewer.setCaretPosition(0);
         content.setSelectedIndex(0);
@@ -650,7 +649,7 @@ public final class Main {
     private static void layout(Container c) {
         c.doLayout();
         if (c instanceof JSplitPane split) {
-            split.setDividerLocation(.28);
+            split.setDividerLocation(310);
             split.doLayout();
         }
         for (Component child : c.getComponents())
@@ -658,8 +657,11 @@ public final class Main {
                 layout(container);
     }
     public static void main(String[] args) throws Exception {
+        boolean render = args.length == 2 && args[0].equals("--render");
+        // Export grayscale glyphs. LCD subpixel colors are specific to a physical screen.
+        if (render) System.setProperty("awt.useSystemAAFontSettings", "on");
         Theme.install();
-        if (args.length == 2 && args[0].equals("--render")) {
+        if (render) {
             SwingUtilities.invokeAndWait(() -> {
                 Main app = new Main();
                 try {
@@ -680,10 +682,11 @@ public final class Main {
                         + "imported snapshot shows a two-thread monitor cycle.\nNext step: enforce "
                         + "one lock acquisition order and retest.");
                     Container pane = app.frame.getContentPane();
-                    pane.setSize(1400, 900);
+                    pane.setSize(1040, 710);
                     layout(pane);
-                    BufferedImage image = new BufferedImage(1400, 900, BufferedImage.TYPE_INT_RGB);
+                    BufferedImage image = new BufferedImage(pane.getWidth() * 2, pane.getHeight() * 2, BufferedImage.TYPE_INT_RGB);
                     Graphics2D g = image.createGraphics();
+                    g.scale(2, 2);
                     g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
                                        RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
                     pane.printAll(g);

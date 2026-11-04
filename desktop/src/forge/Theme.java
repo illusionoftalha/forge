@@ -12,7 +12,7 @@ final class Theme {
     static final Color SURFACE = new Color(23, 24, 27);
     static final Color BORDER = new Color(46, 48, 53);
     static final Color INK = new Color(231, 232, 235);
-    static final Color MUTED = new Color(149, 153, 162);
+    static final Color MUTED = new Color(182, 186, 194);
 
     static final class Mark implements Icon {
         public int getIconWidth() { return 34; }
@@ -30,10 +30,17 @@ final class Theme {
         }
     }
 
+    static Font preferredFont(int size, String fallback, String... families) {
+        for (String family : families) {
+            Font candidate = new Font(family, Font.PLAIN, size);
+            if (candidate.getFamily().equalsIgnoreCase(family)) return candidate;
+        }
+        return new Font(fallback, Font.PLAIN, size);
+    }
+
     static void install() {
-        System.setProperty("awt.useSystemAAFontSettings", "on");
-        System.setProperty("swing.aatext", "true");
-        var font = new javax.swing.plaf.FontUIResource("SansSerif", Font.PLAIN, 13);
+        Font ui = preferredFont(15, Font.SANS_SERIF, "Segoe UI", "Noto Sans", "DejaVu Sans");
+        var font = new javax.swing.plaf.FontUIResource(ui);
         for (Object key : Collections.list(UIManager.getDefaults().keys()))
             if (UIManager.get(key) instanceof javax.swing.plaf.FontUIResource)
                 UIManager.put(key, font);
@@ -148,7 +155,7 @@ final class Theme {
                                  int index, String title, Rectangle rect, boolean selected) {
             g.setFont(font);
             g.setColor(selected ? INK : MUTED);
-            g.drawString(title, rect.x, rect.y + metrics.getAscent());
+            BasicGraphicsUtils.drawString(tabPane, (Graphics2D)g, title, rect.x, rect.y + metrics.getAscent());
         }
     }
 }

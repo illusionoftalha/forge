@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- Increase interface and code font sizes, brighten secondary labels and respect desktop font smoothing.
+- Render the compact guide preview at double resolution.
+
 ## 0.2.1
 
 - Redesign the desktop around the repository sidebar and document inspector.
